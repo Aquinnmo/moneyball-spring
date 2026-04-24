@@ -1,4 +1,4 @@
-package ca.adam_montgomery.moneyball
+package ca.adam_montgomery.moneyball.structures
 
 data class Schedule (
     val totalItems: Int,
