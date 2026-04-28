@@ -67,7 +67,6 @@ data class TeamGameData(
 data class TeamInfo(
     val id: Int,
     val name: String,
-    val link: String
 )
 
 data class LeagueRecord(
@@ -76,8 +75,8 @@ data class LeagueRecord(
     val pct: String,
 )
 
+
 data class Venue(
     val id: Int,
     val name: String,
-    val link: String,
 )
