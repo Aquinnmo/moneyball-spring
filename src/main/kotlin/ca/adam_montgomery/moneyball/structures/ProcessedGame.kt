@@ -22,6 +22,8 @@ data class Batter(
     val runs: Int,
     val errors: Int,
     val nPA: Int,
+    val abCount: Int = 0,
+    val wobaCount: Int = 0,
     val xBa: Double,
     val wOBA: Double,
     val xSLG: Double,

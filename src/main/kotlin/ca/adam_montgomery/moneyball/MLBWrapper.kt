@@ -105,21 +105,44 @@ data class Pitch(
 )
 
 fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: List<Pitch>) : ProcessedGame {
+    val nonABEvents = setOf("walk", "hit_by_pitch", "intent_walk", "sac_bunt", "sac_fly", "catcher_interf", "sac_bunt_double_play", "sac_fly_double_play")
+    val nonWobaEvents = setOf("sac_bunt", "catcher_interf", "intent_walk", "sac_bunt_double_play")
+
     //process all batters
     val batters: List<Batter> = basicGame.gameData.players.map { player ->
-        val batPitches: List<Pitch> = pitchData.filter { pitch -> pitch.batterId == player.value.id }
-
-        val xBA = batPitches.map { pitch -> pitch.estBA }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
-        val wOBA = batPitches.map { pitch -> pitch.estWOBA }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
-        val xSLG = batPitches.map { pitch -> pitch.estSLG }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
-        val wOPS = xSLG + wOBA
-        val expTimesOnBase = batPitches.sumOf { pitch -> pitch.estWOBA ?: 0.0 }
-        val expBases = batPitches.sumOf { pitch -> pitch.estSLG ?: 0.0 }
-        val nPA = batPitches.maxOfOrNull { pitch -> pitch.nPrioirPA }?.plus(1) ?: 0
+        var batPitches: List<Pitch> = pitchData.filter { pitch -> pitch.batterId == player.value.id }
         val maxBatSpeed = batPitches.map { pitch -> pitch.batSpeed }.filterNotNull().maxOrNull() ?: 0.0
         val avgBatSpeed = batPitches.map { pitch -> pitch.batSpeed }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
+        batPitches = batPitches.groupBy{ it.nPrioirPA }.map{ it.value.maxByOrNull { pitch -> pitch.pitchNumber }!! }
+        
+        val expTimesOnBase = batPitches.sumOf { pitch ->
+            pitch.estWOBA ?: when (pitch.event) {
+                "walk" -> 0.69
+                "hit_by_pitch" -> 0.72
+                else -> 0.0
+            }
+        }
+        val expBases = batPitches.sumOf { pitch -> pitch.estSLG ?: 0.0 }
+        val nPA = batPitches.maxOfOrNull { pitch -> pitch.nPrioirPA }?.plus(1) ?: 0
         val maxExitVelo = batPitches.map { pitch -> pitch.exitVelo }.filterNotNull().maxOrNull() ?: 0.0
         val avgExitVelo = batPitches.map { pitch -> pitch.exitVelo }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
+
+        val abPitches = batPitches.filter { it.event !in nonABEvents }
+        val xBA = abPitches.map { it.estBA ?: 0.0 }.let { if (it.isEmpty()) 0.0 else it.average() }
+        val xSLG = abPitches.map { it.estSLG ?: 0.0 }.let { if (it.isEmpty()) 0.0 else it.average() }
+        val abCount = abPitches.size
+
+        val wobaPitches = batPitches.filter { it.event !in nonWobaEvents }
+        val wOBA = wobaPitches.map { pitch ->
+            pitch.estWOBA ?: when (pitch.event) {
+                "walk" -> 0.69
+                "hit_by_pitch" -> 0.72
+                else -> 0.0
+            }
+        }.let { if (it.isEmpty()) 0.0 else it.average() }
+        val wobaCount = wobaPitches.size
+
+        val wOPS = xSLG + wOBA
         val onHomeTeam : Boolean = if (batPitches.isEmpty()) {
             // If no pitches, we try to determine from basicGame
             basicGame.gameData.teams.home.id == basicGame.gameData.players.filter { it.value.id == player.value.id }.keys.firstOrNull()?.let { true } ?: false
@@ -134,23 +157,45 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         Batter(id=player.value.id, firstName = player.value.fullName, lastName = player.value.lastName,
             fullName = player.value.fullName, hits = 0, runs = 0, errors = 0,
             primaryNumber = player.value.primaryNumber, xBa = xBA, wOBA = wOBA, xSLG = xSLG, wOPS = wOPS,
-            nPA = nPA, maxBatSpeed = maxBatSpeed, position = player.value.primaryPosition.code,
+            nPA = nPA, abCount = abCount, wobaCount = wobaCount, maxBatSpeed = maxBatSpeed, position = player.value.primaryPosition.code,
             batHand = player.value.batHand?.code, avgBatSpeed = avgBatSpeed, maxExitVelo = maxExitVelo,
             avgExitVelo = avgExitVelo, expTimesOnBase = expTimesOnBase, expBases = expBases, onHomeTeam = onHomeTeam)
     }
 
     //process all pitchers
     val pitchers: List<Pitcher> = basicGame.gameData.players.map { player ->
-        val pitches: List<Pitch> = pitchData.filter { pitch -> pitch.pitcherId == player.value.id }
-
-        val xBA = pitches.map { pitch -> pitch.estBA }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
-        val wOBA = pitches.map { pitch -> pitch.estWOBA }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
-        val xSLG = pitches.map { pitch -> pitch.estSLG }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
-        val wOPS = xSLG + wOBA
-        val expTimesOnBase = pitches.sumOf { pitch -> pitch.estWOBA ?: 0.0 }
-        val expBases = pitches.sumOf { pitch -> pitch.estSLG ?: 0.0 }
+        var pitches: List<Pitch> = pitchData.filter { pitch -> pitch.pitcherId == player.value.id }
         val maxBatSpeed = pitches.map { pitch -> pitch.batSpeed }.filterNotNull().maxOrNull() ?: 0.0
         val avgBatSpeed = pitches.map { pitch -> pitch.batSpeed }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
+
+        //I think this clamps this at minimum 0 for each plate appearance, may need to be the maximum though
+        val expRunsAgainst = pitches.groupBy { it.batterId to it.nPrioirPA }
+            .values.sumOf { pitchList -> maxOf(0.0, pitchList.sumOf { pitch -> pitch.pitchDelta } ) }
+
+        pitches = pitches.groupBy{ it.nPrioirPA }.map{ it.value.maxByOrNull { pitch -> pitch.pitchNumber }!! }
+        val expBases = pitches.sumOf { pitch -> pitch.estSLG ?: 0.0 }
+
+        val abPitches = pitches.filter { it.event !in nonABEvents }
+        val xBA = abPitches.map { it.estBA ?: 0.0 }.let { if (it.isEmpty()) 0.0 else it.average() }
+        val xSLG = abPitches.map { it.estSLG ?: 0.0 }.let { if (it.isEmpty()) 0.0 else it.average() }
+
+        val wobaPitches = pitches.filter { it.event !in nonWobaEvents }
+        val wOBA = wobaPitches.map { pitch ->
+            pitch.estWOBA ?: when (pitch.event) {
+                "walk" -> 0.69
+                "hit_by_pitch" -> 0.72
+                else -> 0.0
+            }
+        }.let { if (it.isEmpty()) 0.0 else it.average() }
+
+        val wOPS = xSLG + wOBA
+        val expTimesOnBase = pitches.sumOf { pitch ->
+            pitch.estWOBA ?: when (pitch.event) {
+                "walk" -> 0.69
+                "hit_by_pitch" -> 0.72
+                else -> 0.0
+            }
+        }
         val maxExitVelo = pitches.map { pitch -> pitch.exitVelo }.filterNotNull().maxOrNull() ?: 0.0
         val avgExitVelo = pitches.map { pitch -> pitch.exitVelo }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
         val plateAppearancesAgainst = pitches.map { it.batterId to it.nPrioirPA }.distinct().size
@@ -167,10 +212,6 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
             else 0
         }
 
-        //I think this clamps this at minimum 0 for each plate appearance, may need to be the maximum though
-        val expRunsAgainst = pitches.groupBy { it.batterId to it.nPrioirPA }
-            .values.sumOf { pitch -> maxOf(0.0, pitch.sumOf { pitch -> pitch.pitchDelta } ) }
-
         Pitcher(id=player.value.id, firstName = player.value.fullName, lastName = player.value.lastName,
             fullName = player.value.fullName, primaryNumber = player.value.primaryNumber,
             maxBatSpeed = maxBatSpeed, pitchHand = player.value.pitchHand?.code, avgBatSpeed = avgBatSpeed,
@@ -184,6 +225,22 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
     val homeTeamStats : Map<String, Any> = getTeamData(true, batters, pitchers)
     val awayTeamStats = getTeamData(false, batters, pitchers)
 
+    fun calcExpWin(runsFor: Double, runsAgainst: Double): Double {
+        if (runsFor == 0.0 && runsAgainst == 0.0) return 0.5
+        return (runsFor * runsFor) / ((runsFor * runsFor) + (runsAgainst * runsAgainst))
+    }
+
+    val homeActualRuns = (basicGame.liveData.linescore.teams.home.runs ?: 0).toDouble()
+    val awayActualRuns = (basicGame.liveData.linescore.teams.away.runs ?: 0).toDouble()
+
+    val homeExpWinBat = calcExpWin(homeTeamStats["expRunsFor"] as Double, awayActualRuns)
+    val homeExpWinPitch = calcExpWin(homeActualRuns, homeTeamStats["expRunsAgainst"] as Double)
+    val homeExpWin = (homeExpWinBat + homeExpWinPitch) / 2.0
+
+    val awayExpWinBat = calcExpWin(awayTeamStats["expRunsFor"] as Double, homeActualRuns)
+    val awayExpWinPitch = calcExpWin(awayActualRuns, awayTeamStats["expRunsAgainst"] as Double)
+    val awayExpWin = (awayExpWinBat + awayExpWinPitch) / 2.0
+
     val homeTeam = Team(
         id=basicGame.gameData.teams.home.id,
         name=basicGame.gameData.teams.home.name,
@@ -193,9 +250,9 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         runs = basicGame.liveData.linescore.teams.home.runs ?: 0,
         leftOnBase = basicGame.liveData.linescore.teams.home.leftOnBase,
         expRunsFor = homeTeamStats["expRunsFor"] as Double,
-        expWin = null,
-        expWinBat = null,
-        expWinPitch = null,
+        expWin = homeExpWin,
+        expWinBat = homeExpWinBat,
+        expWinPitch = homeExpWinPitch,
         nPA = homeTeamStats["nPA"] as Int,
         xBA = homeTeamStats["xBA"] as Double,
         wOBA = homeTeamStats["wOBA"] as Double,
@@ -214,9 +271,9 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         leftOnBase = basicGame.liveData.linescore.teams.away.leftOnBase,
         expRunsFor = awayTeamStats["expRunsFor"] as Double,
         expTimesOn = awayTeamStats["expTimesOnBase"] as Double,
-        expWin = null,
-        expWinBat = null,
-        expWinPitch = null,
+        expWin = awayExpWin,
+        expWinBat = awayExpWinBat,
+        expWinPitch = awayExpWinPitch,
         nPA = awayTeamStats["nPA"] as Int,
         xBA = awayTeamStats["xBA"] as Double,
         wOBA = awayTeamStats["wOBA"] as Double,
@@ -236,15 +293,18 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
 }
 
 fun getTeamData(forHomeTeam: Boolean, batters: List<Batter>, pitchers: List<Pitcher>) : Map<String, Any> {
-    val batters = batters.filter { it.onHomeTeam == forHomeTeam }
-    val pitchers = pitchers.filter { it.onHomeTeam == forHomeTeam }
-    val nPA = batters.sumOf { it.nPA }
-    val xBA = batters.map{ it.xBa }.let { if (it.isEmpty()) 0.0 else it.average() }
-    val wOBA = batters.map{ it.wOBA }.let { if (it.isEmpty()) 0.0 else it.average() }
-    val xSLG = batters.map{ it.xSLG }.let { if (it.isEmpty()) 0.0 else it.average() }
+    val teamBatters = batters.filter { it.onHomeTeam == forHomeTeam }
+    val teamPitchers = pitchers.filter { it.onHomeTeam == forHomeTeam }
+    val activeBatters = teamBatters.filter { it.nPA > 0 }
+    val nPA = teamBatters.sumOf { it.nPA }
+
+    val xBA = if (nPA == 0) 0.0 else activeBatters.map{ it.xBa * it.abCount }.sum() / activeBatters.sumOf { it.abCount }
+    val wOBA = if (nPA == 0) 0.0 else activeBatters.map{ it.wOBA * it.wobaCount }.sum() / activeBatters.sumOf { it.wobaCount }
+    val xSLG = if (nPA == 0) 0.0 else activeBatters.map{ it.xSLG * it.abCount }.sum() / activeBatters.sumOf { it.abCount }
     val wOPS = xSLG + wOBA
-    val expRunsFor = batters.sumOf{ it.xSLG }
-    val expTimesOnBase = batters.sumOf{ it.expTimesOnBase }
+    val expRunsFor = teamBatters.sumOf{ it.xSLG }
+    val expTimesOnBase = teamBatters.sumOf{ it.expTimesOnBase }
+    val expRunsAgainst = teamPitchers.sumOf { it.expRunsAgainst }
     return mapOf(
         "nPA" to nPA,
         "xBA" to xBA,
@@ -252,6 +312,7 @@ fun getTeamData(forHomeTeam: Boolean, batters: List<Batter>, pitchers: List<Pitc
         "xSLG" to xSLG,
         "wOPS" to wOPS,
         "expRunsFor" to expRunsFor,
+        "expRunsAgainst" to expRunsAgainst,
         "expTimesOnBase" to expTimesOnBase,
     )
 }
