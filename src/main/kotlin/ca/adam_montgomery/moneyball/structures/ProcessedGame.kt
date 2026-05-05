@@ -30,6 +30,7 @@ data class Batter(
     val wOPS: Double,
     val expTimesOnBase: Double,
     val expBases: Double,
+    val tOPS: Double,
     val maxExitVelo: Double,
     val avgBatSpeed: Double,
     val maxBatSpeed: Double,

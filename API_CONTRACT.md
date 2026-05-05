@@ -211,6 +211,7 @@ Comprehensive game data with advanced metrics.
   "wOPS": "number",
   "expTimesOnBase": "number",
   "expBases": "number",
+  "tOPS": "number (expTimesOnBase + expBases)",
   "maxExitVelo": "number",
   "avgBatSpeed": "number",
   "maxBatSpeed": "number",
