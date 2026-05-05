@@ -33,8 +33,12 @@ class AppConfig {
 
 @Service
 class StatsApiWrapper(private val restTemplate: RestTemplate) {
-    fun getSchedule(): Schedule? {
-        val url = "${STATS_API_URL}v1/schedule?sportId=1"
+    fun getSchedule(date: String? = null): Schedule? {
+        val url = if (date != null) {
+            "${STATS_API_URL}v1/schedule?sportId=1&date=$date"
+        } else {
+            "${STATS_API_URL}v1/schedule?sportId=1"
+        }
         return restTemplate.getForObject(url, Schedule::class.java)
     }
 
@@ -51,9 +55,14 @@ class StatcastWrapper(private val restTemplate: RestTemplate) {
         return restTemplate.getForObject(url, StatcastGame::class.java)
     }
 
+    /**
+     * Fetches and parses pitch-by-pitch CSV data from Baseball Savant for a specific game.
+     * This data includes advanced metrics like pitch delta run expectancy, exit velocity, and estimated BA/wOBA.
+     */
     fun fetchCSV(gamePk: Int) : List<Pitch> {
         val url = "https://baseballsavant.mlb.com/statcast_search/csv?all=true&game_pk=$gamePk&type=details&player_type=pitcher"
         val headers = HttpHeaders()
+
         headers["User-Agent"] = "Mozilla/5.0"
 
         val request = HttpEntity<Void>(headers)
@@ -68,7 +77,7 @@ class StatcastWrapper(private val restTemplate: RestTemplate) {
             Pitch(
                 pitcherId = record.get("pitcher").toInt(),
                 batterId = record.get("batter").toInt(),
-                pitchDelta = record.get("delta_pitcher_run_exp").toDouble(),
+                pitchDelta = try { record.get("delta_pitcher_run_exp").toDouble() } catch (e: Exception) { 0.0 },
                 batSpeed = record.get("bat_speed").toDoubleOrNull(),
                 estBA = record.get("estimated_ba_using_speedangle").toDoubleOrNull(),
                 estSLG = record.get("estimated_slg_using_speedangle").toDoubleOrNull(),

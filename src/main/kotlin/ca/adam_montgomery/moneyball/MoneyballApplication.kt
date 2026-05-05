@@ -74,6 +74,21 @@ class APIInterface(private val statsAPI: StatsApiWrapper, private val statcastAP
 		return getGamesFromSchedule(sched)
 	}
 
+	@GetMapping("schedule/{date}")
+	fun dateSchedule(@PathVariable date: String): Schedule? {
+		print("hit schedule endpoint for date $date\n")
+		val sched = statsAPI.getSchedule(date)
+		print("successfully got schedule for date $date\n")
+		return sched
+	}
+
+	@GetMapping("games/{date}")
+	fun dateGames(@PathVariable date: String): List<ParsedGame>? {
+		val sched = dateSchedule(date)
+		print("successfully got games for date $date\n")
+		return getGamesFromSchedule(sched)
+	}
+
 	fun getGamesFromSchedule(sched: Schedule?): List<ParsedGame>? {
 
 		return sched?.dates?.flatMap { date ->
