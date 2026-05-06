@@ -186,7 +186,18 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         val expRunsAgainst = pitches.groupBy { it.batterId to it.nPrioirPA }
             .values.sumOf { pitchList -> maxOf(0.0, pitchList.sumOf { pitch -> pitch.pitchDelta } ) }
 
-        pitches = pitches.groupBy{ it.nPrioirPA }.map{ it.value.maxByOrNull { pitch -> pitch.pitchNumber }!! }
+        val singleOut = setOf("strikeout", "field_out", "force_out", "fielders_choice", "fielders_choice_out", "sac_fly", "sac_bunt", "caught_stealing_2b",
+            "caught_stealing_3b", "caught_stealing_home", "pickoff_caught_stealing_2b", "pickoff_caught_stealing_3b", "pickoff_caught_stealing_home", "pickoff_1b", "pickoff_2b", "pickoff_3b")
+        val twoOuts = setOf("grounded_into_double_play", "double_play", "strikeout_double_play", "sac_fly_double_play")
+        val threeOuts = setOf("triple_play")
+        val outsRecorded = pitches.map { pitch -> pitch.event }.filterNotNull().sumOf { event ->
+            if (event in singleOut)  1
+            else if (event in twoOuts)  2
+            else if (event in threeOuts)  3
+            else 0
+        }
+
+        pitches = pitches.groupBy{ it.batterId to it.nPrioirPA }.map{ it.value.maxByOrNull { pitch -> pitch.pitchNumber }!! }
         val expBases = pitches.sumOf { pitch -> pitch.estSLG ?: 0.0 }
 
         val abPitches = pitches.filter { it.event !in nonABEvents }
@@ -212,19 +223,9 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         }
         val maxExitVelo = pitches.map { pitch -> pitch.exitVelo }.filterNotNull().maxOrNull() ?: 0.0
         val avgExitVelo = pitches.map { pitch -> pitch.exitVelo }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
-        val plateAppearancesAgainst = pitches.map { it.batterId to it.nPrioirPA }.distinct().size
+        val plateAppearancesAgainst = pitches.size
         val avgLaunchAngle = pitches.map { it.launchAngle }.filterNotNull().let { if (it.isEmpty()) 0.0 else it.average() }
         val onHomeTeam : Boolean = if (pitches.isEmpty()) false else pitches.first().topOfInning
-        val singleOut = setOf("strikeout", "field_out", "force_out", "fielders_choice_out", "sac_fly", "sac_bunt", "caught_stealing_2b",
-            "caught_stealing_3b", "caught_stealing_home", "pickoff_caught_stealing_2b", "pickoff_caught_stealing_3b", "pickoff_caught_stealing_home")
-        val twoOuts = setOf("grounded_into_double_play", "double_play", "strikeout_double_play", "sac_fly_double_play")
-        val threeOuts = setOf("triple_play")
-        val outsRecorded = pitches.map { pitch -> pitch.event }.filterNotNull().sumOf { event ->
-            if (event in singleOut)  1
-            else if (event in twoOuts)  2
-            else if (event in threeOuts)  3
-            else 0
-        }
 
         Pitcher(id=player.value.id, firstName = player.value.fullName, lastName = player.value.lastName,
             fullName = player.value.fullName, primaryNumber = player.value.primaryNumber,
@@ -246,6 +247,8 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
 
     val homeActualRuns = (basicGame.liveData.linescore.teams.home.runs ?: 0).toDouble()
     val awayActualRuns = (basicGame.liveData.linescore.teams.away.runs ?: 0).toDouble()
+
+     
 
     val homeExpWinBat = calcExpWin(homeTeamStats["expRunsFor"] as Double, awayActualRuns)
     val homeExpWinPitch = calcExpWin(homeActualRuns, homeTeamStats["expRunsAgainst"] as Double)
@@ -273,6 +276,7 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         xSLG = homeTeamStats["xSLG"] as Double,
         wOPS = homeTeamStats["wOPS"] as Double,
         expTimesOn = homeTeamStats["expTimesOnBase"] as Double,
+        expRunsAgainst = homeTeamStats["expRunsAgainst"] as Double,
         )
 
     val awayTeam = Team(
@@ -285,6 +289,7 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         leftOnBase = basicGame.liveData.linescore.teams.away.leftOnBase,
         expRunsFor = awayTeamStats["expRunsFor"] as Double,
         expTimesOn = awayTeamStats["expTimesOnBase"] as Double,
+        expRunsAgainst = awayTeamStats["expRunsAgainst"] as Double,
         expWin = awayExpWin,
         expWinBat = awayExpWinBat,
         expWinPitch = awayExpWinPitch,

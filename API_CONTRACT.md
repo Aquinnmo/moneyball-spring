@@ -185,7 +185,8 @@ Comprehensive game data with advanced metrics.
   "expWin": "number | null",
   "expWinBat": "number | null",
   "expWinPitch": "number | null",
-  "expTimesOn": "number"
+  "expTimesOn": "number",
+  "expRunsAgainst": "number"
 }
 ```
 

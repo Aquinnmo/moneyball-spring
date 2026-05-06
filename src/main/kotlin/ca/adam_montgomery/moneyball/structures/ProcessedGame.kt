@@ -85,4 +85,5 @@ data class Team(
     val expWinBat: Double?,
     val expWinPitch: Double?,
     val expTimesOn: Double,
+    val expRunsAgainst: Double,
 )
