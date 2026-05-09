@@ -30,7 +30,7 @@ Build the container image from the repository root:
 ```bash
 docker build -t moneyball-spring:latest .
 ```
-The Docker build compiles the Spring Boot jar inside the image build (no pre-built `build/libs` directory required).
+The Docker build compiles the Spring Boot JAR inside the image build (no pre-built `build/libs` directory required).
 
 Run the REST API as a containerized server on port `8080`:
 ```bash
