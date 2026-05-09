@@ -1,0 +1,14 @@
+.git
+.github
+.gradle
+# built in Docker build stage, not required from host context
+build
+out
+*.iml
+*.log
+.DS_Store
+README.md
+API_CONTRACT.md
+ARCHITECTURE.md
+AI.md
+.instructions.md
