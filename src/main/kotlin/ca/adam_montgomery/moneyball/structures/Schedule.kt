@@ -1,4 +1,4 @@
-package ca.adam_montgomery.moneyball
+package ca.adam_montgomery.moneyball.structures
 
 data class Schedule (
     val totalItems: Int,
@@ -67,7 +67,6 @@ data class TeamGameData(
 data class TeamInfo(
     val id: Int,
     val name: String,
-    val link: String
 )
 
 data class LeagueRecord(
@@ -76,8 +75,8 @@ data class LeagueRecord(
     val pct: String,
 )
 
+
 data class Venue(
     val id: Int,
     val name: String,
-    val link: String,
 )
