@@ -36,6 +36,11 @@ Build the container image from the repository root:
 docker build -t moneyball-spring:latest .
 ```
 
+If the jar name differs from the default `build/libs/moneyball-0.0.1-SNAPSHOT.jar`, pass it explicitly:
+```bash
+docker build --build-arg JAR_FILE=build/libs/<your-jar-name>.jar -t moneyball-spring:latest .
+```
+
 Run the REST API as a containerized server on port `8080`:
 ```bash
 docker run --rm -p 8080:8080 moneyball-spring:latest
