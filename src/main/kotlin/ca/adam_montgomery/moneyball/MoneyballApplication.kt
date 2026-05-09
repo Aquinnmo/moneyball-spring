@@ -21,7 +21,8 @@ class CorsConfig : WebMvcConfigurer {
 		registry.addMapping("/**")
 			.allowedOrigins(
 				"https://adam-montgomery.ca",
-				"http://localhost:5173"
+				"http://localhost:5173",
+				"https://aquinnmo.github.io",
 			)
 			.allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
 			.allowedHeaders("Authorization", "Content-Type")
