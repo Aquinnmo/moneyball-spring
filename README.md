@@ -26,20 +26,11 @@ This is a standard Gradle project. Use the provided wrapper commands in your ter
 
 ### 2.1 Docker Deployment
 
-Build the runnable Spring Boot jar:
-```bash
-./gradlew bootJar
-```
-
 Build the container image from the repository root:
 ```bash
 docker build -t moneyball-spring:latest .
 ```
-
-If the jar name differs from the default `build/libs/moneyball-0.0.1-SNAPSHOT.jar`, pass it explicitly:
-```bash
-docker build --build-arg JAR_FILE=build/libs/<your-jar-name>.jar -t moneyball-spring:latest .
-```
+The Docker build compiles the Spring Boot jar inside the image build (no pre-built `build/libs` directory required).
 
 Run the REST API as a containerized server on port `8080`:
 ```bash
