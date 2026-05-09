@@ -24,6 +24,23 @@ This is a standard Gradle project. Use the provided wrapper commands in your ter
 ./gradlew bootRun
 ```
 
+### 2.1 Docker Deployment
+
+Build the runnable Spring Boot jar:
+```bash
+./gradlew bootJar
+```
+
+Build the container image from the repository root:
+```bash
+docker build -t moneyball-spring:latest .
+```
+
+Run the REST API as a containerized server on port `8080`:
+```bash
+docker run --rm -p 8080:8080 moneyball-spring:latest
+```
+
 ### 3. Testing
 Before proposing a final code change to the user, ensure it compiles and tests currently pass:
 ```bash

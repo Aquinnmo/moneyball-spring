@@ -1,0 +1,12 @@
+.git
+.github
+.gradle
+out
+*.iml
+*.log
+.DS_Store
+README.md
+API_CONTRACT.md
+ARCHITECTURE.md
+AI.md
+.instructions.md
