@@ -197,6 +197,10 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
             else 0
         }
 
+        val hitEvents = setOf("single", "double", "triple", "home_run")
+        val strikeouts = pitches.map { pitch -> pitch.event }.filterNotNull().count { it == "strikeout" }
+        val hitsAgainst = pitches.map { pitch -> pitch.event }.filterNotNull().count { it in hitEvents }
+
         pitches = pitches.groupBy{ it.batterId to it.nPrioirPA }.map{ it.value.maxByOrNull { pitch -> pitch.pitchNumber }!! }
         val expBases = pitches.sumOf { pitch -> pitch.estSLG ?: 0.0 }
 
@@ -233,7 +237,7 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
             maxExitVelo = maxExitVelo, avgExitVelo = avgExitVelo, xBA = xBA, wOBA = wOBA, xSLG = xSLG,
             wOPS = wOPS, battersFaced = plateAppearancesAgainst, outs = outsRecorded, expBases = expBases,
             expTimesOnBase = expTimesOnBase, avgLA = avgLaunchAngle, expRunsAgainst = expRunsAgainst,
-            onHomeTeam = onHomeTeam)
+            onHomeTeam = onHomeTeam, strikeouts = strikeouts, hitsAgainst = hitsAgainst)
     }.filter { it.battersFaced > 0 }
 
     //process team data
@@ -265,6 +269,7 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         errors = basicGame.liveData.linescore.teams.home.errors,
         hits = basicGame.liveData.linescore.teams.home.hits,
         runs = basicGame.liveData.linescore.teams.home.runs ?: 0,
+        runsAgainst = basicGame.liveData.linescore.teams.away.runs ?: 0,
         leftOnBase = basicGame.liveData.linescore.teams.home.leftOnBase,
         expRunsFor = homeTeamStats["expRunsFor"] as Double,
         expWin = homeExpWin,
@@ -286,6 +291,7 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         errors = basicGame.liveData.linescore.teams.away.errors,
         hits = basicGame.liveData.linescore.teams.away.hits,
         runs = basicGame.liveData.linescore.teams.away.runs ?: 0,
+        runsAgainst = basicGame.liveData.linescore.teams.home.runs ?: 0,
         leftOnBase = basicGame.liveData.linescore.teams.away.leftOnBase,
         expRunsFor = awayTeamStats["expRunsFor"] as Double,
         expTimesOn = awayTeamStats["expTimesOnBase"] as Double,
