@@ -43,6 +43,19 @@ class MoneyballApplicationTests {
             pitchHand = Sidedness("R", "Right")
         )
 
+        val player2 = Player(
+            id = 2,
+            fullName = "Batter Two",
+            firstName = "Batter",
+            lastName = "Two",
+            primaryNumber = "20",
+            active = true,
+            primaryPosition = Position("C", "Catcher", "Catcher", "C"),
+            boxscoreName = "B. Two",
+            batHand = Sidedness("L", "Left"),
+            pitchHand = Sidedness("R", "Right")
+        )
+
         val gameData = GameData(
             datetime = DateTime("2024-05-10", "2024-05-10", "D", "1:00", "PM"),
             status = GameDataStatus("F", "Final", false),
@@ -50,7 +63,7 @@ class MoneyballApplicationTests {
                 home = GameDataTeam(1, "H", "Home", "Home", "City", Division(1, "East"), TeamRecord(1, 1, 0)),
                 away = GameDataTeam(2, "A", "Away", "Away", "City", Division(1, "East"), TeamRecord(1, 0, 1))
             ),
-            players = mapOf("ID1" to player1),
+            players = mapOf("ID1" to player1, "ID2" to player2),
             probablePitchers = ProbablePitchersWrapper(ProbablePitcher(1, "P. One"), ProbablePitcher(2, "P. Two"))
         )
 
@@ -75,8 +88,10 @@ class MoneyballApplicationTests {
         )
 
         val pitchData = listOf(
-            Pitch(pitcherId = 1, batterId = 2, pitchDelta = 0.0, event = "strikeout", pitchNumber = 3, nPrioirPA = 0, topOfInning = true, pitchName = "Fastball"),
-            Pitch(pitcherId = 1, batterId = 2, pitchDelta = 0.0, event = "single", pitchNumber = 1, nPrioirPA = 1, topOfInning = true, pitchName = "Fastball")
+            Pitch(pitcherId = 1, batterId = 2, pitchDelta = 0.0, event = null, pitchNumber = 1, nPrioirPA = 0, topOfInning = true, pitchName = "Fastball", pitchResult = "S", description = "called_strike"),
+            Pitch(pitcherId = 1, batterId = 2, pitchDelta = 0.0, event = null, pitchNumber = 2, nPrioirPA = 0, topOfInning = true, pitchName = "Fastball", pitchResult = "B", description = "ball"),
+            Pitch(pitcherId = 1, batterId = 2, pitchDelta = 0.0, event = "strikeout", pitchNumber = 3, nPrioirPA = 0, topOfInning = true, pitchName = "Fastball", pitchResult = "S", description = "swinging_strike"),
+            Pitch(pitcherId = 1, batterId = 2, pitchDelta = 0.0, event = "single", pitchNumber = 1, nPrioirPA = 1, topOfInning = true, pitchName = "Fastball", estBA = 0.8, estSLG = 1.5, estWOBA = 0.7, launchAngle = 20.0, exitVelo = 100.0, pitchResult = "X", description = "hit_into_play", launchSpeedAngle = 6)
         )
 
         val processed = processGame(statcastGame, basicGame, pitchData)
@@ -85,5 +100,24 @@ class MoneyballApplicationTests {
         assertNotNull(pitcher)
         assertEquals(1, pitcher?.strikeouts?.toInt())
         assertEquals(1, pitcher?.hitsAgainst?.toInt())
+        assertEquals(4, pitcher?.pitching?.pitches)
+        assertEquals(1, pitcher?.plateDiscipline?.whiffs)
+
+        val batter = processed.batters.find { it.id == 2 }
+        assertNotNull(batter)
+        assertEquals(2, batter?.batting?.plateAppearances)
+        assertEquals(1, batter?.batting?.hits)
+        assertEquals(1, batter?.battedBall?.hardHitBalls)
+        assertEquals(1, batter?.battedBall?.barrels)
+        assertEquals(0.5, batter?.batting?.battingAverage ?: 0.0, 0.0001)
+        assertTrue((batter?.expected?.xRunsCreated ?: 0.0) > 0.0)
+        assertTrue((batter?.expected?.qualityAdjustedRuns ?: 0.0) > (batter?.expected?.xRunsCreated ?: 0.0))
+
+        assertEquals(1, processed.teams.home.pitching.strikeouts)
+        assertTrue((processed.teams.away.expWin ?: 0.0) > (processed.teams.home.expWin ?: 0.0))
+        assertEquals(processed.teams.away.expWin ?: 0.0, processed.summary.expectedOutcome.awayExpectedWinPercentage, 0.0001)
+        assertTrue(processed.summary.expectedOutcome.awayDeservedRunDifferential > 0.0)
+        assertEquals(1.0, processed.summary.shares.hardHitBalls.away, 0.0001)
+        assertEquals(2, processed.summary.leaders.topBattersByHardHitRate.first().id)
     }
 }

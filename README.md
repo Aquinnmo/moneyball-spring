@@ -46,6 +46,8 @@ Before proposing a final code change to the user, ensure it compiles and tests c
 *Note on Windows:* Use `gradlew.bat` instead of `./gradlew`.
 
 ## Overview
-This system serves a frontend client (expected at `http://localhost:5173` or `https://adam-montgomery.ca`) by processing raw, pitch-by-pitch data and calculating in-game metrics like expected Batting Average (xBA) and weighted On-Base Average (wOBA).
+This system serves a frontend client (expected at `http://localhost:5173` or `https://adam-montgomery.ca`) by processing raw, pitch-by-pitch data and calculating in-game metrics like expected Batting Average (xBA), weighted On-Base Average (wOBA), expected runs created, quality-adjusted deserved runs, batted-ball quality, plate discipline, expected-vs-actual deltas, game shares, and per-game leaders.
+
+The `/game={gamePk}` response is intentionally frontend-ready. It includes grouped stat blocks for teams, batters, pitchers, and a game summary so clients can render box-score views, MoneyPuck-style share charts, leaderboards, expected outcome panels, and advanced stat tables without recalculating denominators. Expected win percentages are driven by deserved runs, blending expected offensive production with opposing pitching prevention.
 
 See `AI.md` for a comprehensive breakdown of how this pipeline operates.

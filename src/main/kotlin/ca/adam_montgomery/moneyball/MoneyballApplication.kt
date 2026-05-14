@@ -3,6 +3,8 @@ package ca.adam_montgomery.moneyball
 import ca.adam_montgomery.moneyball.structures.ProcessedGame
 import ca.adam_montgomery.moneyball.structures.Schedule
 import ca.adam_montgomery.moneyball.structures.StatcastGame
+import ca.adam_montgomery.moneyball.structures.Team
+import ca.adam_montgomery.moneyball.structures.TeamWrapper
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Configuration
