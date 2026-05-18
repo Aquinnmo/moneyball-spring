@@ -10,6 +10,7 @@ import org.apache.commons.csv.CSVFormat
 import org.springframework.http.HttpHeaders
 import org.springframework.http.HttpMethod
 import org.apache.commons.csv.CSVRecord
+import kotlin.math.ceil
 import kotlin.text.toInt
 
 private const val STATS_API_URL = "https://statsapi.mlb.com/api/"
@@ -80,6 +81,10 @@ class StatcastWrapper(private val restTemplate: RestTemplate) {
                 nPrioirPA = record.intOrZero("n_priorpa_thisgame_player_at_bat"),
                 exitVelo = record.doubleOrNull("launch_speed"),
                 event = record.stringOrNull("events"),
+                runnerOnSecond = record.intOrNull("on_2b"),
+                runnerOnThird = record.intOrNull("on_3b"),
+                batScore = record.intOrNull("bat_score"),
+                postBatScore = record.intOrNull("post_bat_score"),
                 topOfInning = record.stringOrNull("inning_topbot") == "Top",
                 pitchType = record.stringOrNull("pitch_type"),
                 description = record.stringOrNull("description"),
@@ -107,6 +112,10 @@ data class Pitch(
     val nPrioirPA: Int,
     val exitVelo: Double? = null,
     val event: String? = null,
+    val runnerOnSecond: Int? = null,
+    val runnerOnThird: Int? = null,
+    val batScore: Int? = null,
+    val postBatScore: Int? = null,
     val topOfInning: Boolean,
     val pitchType: String? = null,
     val description: String? = null,
@@ -138,8 +147,30 @@ private val nonABEvents = setOf(
 )
 
 private val nonWobaEvents = setOf("sac_bunt", "catcher_interf", "intent_walk", "sac_bunt_double_play")
+private val nonPlateAppearanceEvents = setOf(
+    "stolen_base_2b",
+    "stolen_base_3b",
+    "stolen_base_home",
+    "caught_stealing_2b",
+    "caught_stealing_3b",
+    "caught_stealing_home",
+    "pickoff_1b",
+    "pickoff_2b",
+    "pickoff_3b",
+    "pickoff_caught_stealing_2b",
+    "pickoff_caught_stealing_3b",
+    "pickoff_caught_stealing_home",
+    "pickoff_error_1b",
+    "pickoff_error_2b",
+    "pickoff_error_3b",
+    "wild_pitch",
+    "passed_ball",
+    "balk",
+    "defensive_indiff",
+)
 private val hitEvents = setOf("single", "double", "triple", "home_run")
 private val walkEvents = setOf("walk", "intent_walk")
+private val pitchResults = setOf("B", "S", "X")
 
 private fun rate(numerator: Number, denominator: Number): Double {
     val den = denominator.toDouble()
@@ -150,10 +181,69 @@ private fun clamp(value: Double, min: Double, max: Double): Double = value.coerc
 
 private fun inningsPitched(outs: Int): String = "${outs / 3}.${outs % 3}"
 
-private fun finalPlateAppearancePitches(pitches: List<Pitch>): List<Pitch> =
+private data class PlateAppearance(val firstPitch: Pitch, val finalPitch: Pitch)
+
+private data class ScoringChanceLine(
+    val chances: Int,
+    val conversions: Int,
+    val conversionRate: Double,
+)
+
+private fun isPlateAppearanceEvent(event: String?): Boolean =
+    event != null && event !in nonPlateAppearanceEvents
+
+private fun isPitchRow(pitch: Pitch): Boolean = pitch.pitchResult in pitchResults
+
+private fun plateAppearances(pitches: List<Pitch>): List<PlateAppearance> =
     pitches.groupBy { it.batterId to it.nPrioirPA }
         .values
-        .mapNotNull { pitchList -> pitchList.maxByOrNull { it.pitchNumber } }
+        .mapNotNull { pitchList ->
+            val pitchRows = pitchList.filter { isPitchRow(it) }
+            val firstPitch = pitchRows.minByOrNull { it.pitchNumber }
+            val finalPitch = pitchList.filter { isPlateAppearanceEvent(it.event) }
+                .maxByOrNull { it.pitchNumber }
+
+            if (firstPitch != null && finalPitch != null && isPlateAppearanceEvent(finalPitch.event)) {
+                PlateAppearance(firstPitch, finalPitch)
+            } else {
+                null
+            }
+        }
+
+private fun finalPlateAppearancePitches(pitches: List<Pitch>): List<Pitch> =
+    plateAppearances(pitches).map { it.finalPitch }
+
+private fun hasRunnerInScoringPosition(pitch: Pitch): Boolean =
+    pitch.runnerOnSecond != null || pitch.runnerOnThird != null
+
+private fun battingRunsScored(pitch: Pitch): Int {
+    val before = pitch.batScore ?: return 0
+    val after = pitch.postBatScore ?: return 0
+    return maxOf(0, after - before)
+}
+
+private fun averageBatSpeed(batSpeeds: List<Double>): Double {
+    if (batSpeeds.isEmpty()) return 0.0
+    val sampleSize = ceil(batSpeeds.size * 0.9).toInt().coerceAtLeast(1)
+    return batSpeeds.sortedDescending().take(sampleSize).average()
+}
+
+private fun summarizeScoringChances(plateAppearances: List<PlateAppearance>): ScoringChanceLine {
+    val chances = plateAppearances.filter { hasRunnerInScoringPosition(it.firstPitch) }
+    val conversions = chances.count { battingRunsScored(it.finalPitch) > 0 }
+
+    return ScoringChanceLine(
+        chances = chances.size,
+        conversions = conversions,
+        conversionRate = rate(conversions, chances.size),
+    )
+}
+
+private fun Boxscore?.player(playerKey: String, onHomeTeam: Boolean): BoxscorePlayer? {
+    val teams = this?.teams ?: return null
+    val team = if (onHomeTeam) teams.home else teams.away
+    return team.players[playerKey]
+}
 
 private fun isSwing(pitch: Pitch): Boolean {
     val description = pitch.description ?: return pitch.pitchResult == "X"
@@ -174,14 +264,14 @@ private fun isWhiff(pitch: Pitch): Boolean =
 
 private fun isStrikeOrBallInPlay(pitch: Pitch): Boolean = pitch.pitchResult == "S" || pitch.pitchResult == "X"
 
-private fun summarizePlateDiscipline(pitches: List<Pitch>, plateAppearances: Int): PlateDiscipline {
+private fun summarizePlateDiscipline(pitches: List<Pitch>, plateAppearances: List<PlateAppearance>): PlateDiscipline {
     val strikes = pitches.count { isStrikeOrBallInPlay(it) }
     val balls = pitches.count { it.pitchResult == "B" }
     val swings = pitches.count { isSwing(it) }
     val whiffs = pitches.count { isWhiff(it) }
     val calledStrikes = pitches.count { it.description == "called_strike" }
     val csw = calledStrikes + whiffs
-    val firstPitchStrikes = pitches.count { it.pitchNumber == 1 && isStrikeOrBallInPlay(it) }
+    val firstPitchStrikes = plateAppearances.count { isStrikeOrBallInPlay(it.firstPitch) }
 
     return PlateDiscipline(
         pitches = pitches.size,
@@ -196,7 +286,7 @@ private fun summarizePlateDiscipline(pitches: List<Pitch>, plateAppearances: Int
         swingRate = rate(swings, pitches.size),
         whiffRate = rate(whiffs, swings),
         cswRate = rate(csw, pitches.size),
-        firstPitchStrikeRate = rate(firstPitchStrikes, plateAppearances),
+        firstPitchStrikeRate = rate(firstPitchStrikes, plateAppearances.size),
     )
 }
 
@@ -219,6 +309,8 @@ private fun summarizeBattedBalls(pitches: List<Pitch>): BattedBallProfile {
         hardHitRate = rate(hardHitBalls, ballsInPlay.size),
         barrelRate = rate(barrels, ballsInPlay.size),
         sweetSpotRate = rate(sweetSpotBalls, ballsInPlay.size),
+        exitVeloSamples = exitVelos.size,
+        launchAngleSamples = launchAngles.size,
     )
 }
 
@@ -231,7 +323,7 @@ private fun summarizeBatting(finalPitches: List<Pitch>): BattingLine {
     val homeRuns = events.count { it == "home_run" }
     val walks = events.count { it in walkEvents }
     val hitByPitch = events.count { it == "hit_by_pitch" }
-    val strikeouts = events.count { it == "strikeout" }
+    val strikeouts = events.count { it == "strikeout" || it == "strikeout_double_play" }
     val sacFlies = events.count { it == "sac_fly" || it == "sac_fly_double_play" }
     val atBats = finalPitches.count { it.event !in nonABEvents }
     val totalBases = singles + (2 * doubles) + (3 * triples) + (4 * homeRuns)
@@ -318,11 +410,12 @@ private fun buildExpectedBattingLine(
     xWeightedTimesOnBase: Double,
     battedBall: BattedBallProfile,
     discipline: PlateDiscipline,
+    xWobaDenominator: Int,
 ): ExpectedBattingLine {
     val xHomeRuns = estimateExpectedHomeRuns(xTotalBases, battedBall)
     val xBA = rate(xHits, batting.atBats)
     val xOBP = rate(xHits + batting.walks + batting.hitByPitch, batting.atBats + batting.walks + batting.hitByPitch + batting.sacFlies)
-    val xWOBA = rate(xWeightedTimesOnBase, batting.plateAppearances)
+    val xWOBA = rate(xWeightedTimesOnBase, xWobaDenominator)
     val xSLG = rate(xTotalBases, batting.atBats)
     val xOPS = xOBP + xSLG
     val baseRuns = estimateBaseRuns(batting, xHits, xTotalBases, xHomeRuns)
@@ -357,6 +450,7 @@ private fun buildExpectedBattingLine(
             batting.totalBases.toDouble(),
             batting.homeRuns.toDouble(),
         ) - xRunsCreated,
+        xWobaDenominator = xWobaDenominator,
     )
 }
 
@@ -377,18 +471,30 @@ private fun summarizeExpectedBatting(
             else -> 0.0
         }
     }
-    return buildExpectedBattingLine(batting, xHits, xTotalBases, xWeightedTimesOnBase, battedBall, discipline)
+    return buildExpectedBattingLine(
+        batting,
+        xHits,
+        xTotalBases,
+        xWeightedTimesOnBase,
+        battedBall,
+        discipline,
+        wobaPitches.size,
+    )
 }
 
-private fun summarizePitching(rawPitches: List<Pitch>, finalPitches: List<Pitch>, outs: Int): PitchingLine {
+private fun summarizePitching(
+    pitchRows: List<Pitch>,
+    finalPitches: List<Pitch>,
+    outs: Int,
+    discipline: PlateDiscipline,
+): PitchingLine {
     val battingAgainst = summarizeBatting(finalPitches)
-    val discipline = summarizePlateDiscipline(rawPitches, finalPitches.size)
 
     return PitchingLine(
         battersFaced = finalPitches.size,
         outs = outs,
         inningsPitched = inningsPitched(outs),
-        pitches = rawPitches.size,
+        pitches = pitchRows.size,
         strikes = discipline.strikes,
         balls = discipline.balls,
         hitsAllowed = battingAgainst.hits,
@@ -433,6 +539,9 @@ private fun summarizeExpectedPitching(
         contactRunValueAllowed = expectedAgainst.contactRunValue,
         disciplineRunValueAllowed = pitcherDisciplineRuns,
         runPreventionValue = -qualityAdjustedRunsAllowed,
+        xAtBatsAllowed = battingAgainst.atBats,
+        xObpDenominatorAllowed = battingAgainst.atBats + battingAgainst.walks + battingAgainst.hitByPitch + battingAgainst.sacFlies,
+        xWobaDenominatorAllowed = expectedAgainst.xWobaDenominator,
     )
 }
 
@@ -485,7 +594,16 @@ private fun combineExpectedBatting(
     val xHits = lines.sumOf { it.xHits }
     val xTotalBases = lines.sumOf { it.xTotalBases }
     val xWeightedTimesOnBase = lines.sumOf { it.xWeightedTimesOnBase }
-    return buildExpectedBattingLine(batting, xHits, xTotalBases, xWeightedTimesOnBase, battedBall, discipline)
+    val xWobaDenominator = lines.sumOf { it.xWobaDenominator }
+    return buildExpectedBattingLine(
+        batting,
+        xHits,
+        xTotalBases,
+        xWeightedTimesOnBase,
+        battedBall,
+        discipline,
+        xWobaDenominator,
+    )
 }
 
 private fun combineBattedBalls(profiles: List<BattedBallProfile>): BattedBallProfile {
@@ -493,18 +611,22 @@ private fun combineBattedBalls(profiles: List<BattedBallProfile>): BattedBallPro
     val hardHitBalls = profiles.sumOf { it.hardHitBalls }
     val barrels = profiles.sumOf { it.barrels }
     val sweetSpotBalls = profiles.sumOf { it.sweetSpotBalls }
+    val exitVeloSamples = profiles.sumOf { it.exitVeloSamples }
+    val launchAngleSamples = profiles.sumOf { it.launchAngleSamples }
 
     return BattedBallProfile(
         ballsInPlay = ballsInPlay,
         hardHitBalls = hardHitBalls,
         barrels = barrels,
         sweetSpotBalls = sweetSpotBalls,
-        avgExitVelo = rate(profiles.sumOf { it.avgExitVelo * it.ballsInPlay }, ballsInPlay),
+        avgExitVelo = rate(profiles.sumOf { it.avgExitVelo * it.exitVeloSamples }, exitVeloSamples),
         maxExitVelo = profiles.maxOfOrNull { it.maxExitVelo } ?: 0.0,
-        avgLaunchAngle = rate(profiles.sumOf { it.avgLaunchAngle * it.ballsInPlay }, ballsInPlay),
+        avgLaunchAngle = rate(profiles.sumOf { it.avgLaunchAngle * it.launchAngleSamples }, launchAngleSamples),
         hardHitRate = rate(hardHitBalls, ballsInPlay),
         barrelRate = rate(barrels, ballsInPlay),
         sweetSpotRate = rate(sweetSpotBalls, ballsInPlay),
+        exitVeloSamples = exitVeloSamples,
+        launchAngleSamples = launchAngleSamples,
     )
 }
 
@@ -569,6 +691,9 @@ private fun combineExpectedPitching(lines: List<ExpectedPitchingLine>, pitching:
     val xHitsAllowed = lines.sumOf { it.xHitsAllowed }
     val xTotalBasesAllowed = lines.sumOf { it.xTotalBasesAllowed }
     val xWeightedTimesOnBaseAllowed = lines.sumOf { it.xWeightedTimesOnBaseAllowed }
+    val xAtBatsAllowed = lines.sumOf { it.xAtBatsAllowed }
+    val xObpDenominatorAllowed = lines.sumOf { it.xObpDenominatorAllowed }
+    val xWobaDenominatorAllowed = lines.sumOf { it.xWobaDenominatorAllowed }
     val expectedRunsAllowed = lines.sumOf { it.expectedRunsAllowed }
     val qualityAdjustedRunsAllowed = lines.sumOf { it.qualityAdjustedRunsAllowed }
     val xHomeRunsAllowed = lines.sumOf { it.xHomeRunsAllowed }
@@ -576,11 +701,11 @@ private fun combineExpectedPitching(lines: List<ExpectedPitchingLine>, pitching:
     val disciplineRunValueAllowed = lines.sumOf { it.disciplineRunValueAllowed }
     val xOBPAllowed = rate(
         xHitsAllowed + pitching.walksAllowed + pitching.hitByPitchAllowed,
-        pitching.battersFaced,
+        xObpDenominatorAllowed,
     )
-    val xBAAllowed = rate(xHitsAllowed, pitching.battersFaced - pitching.walksAllowed - pitching.hitByPitchAllowed)
-    val xWOBAAllowed = rate(xWeightedTimesOnBaseAllowed, pitching.battersFaced)
-    val xSLGAllowed = rate(xTotalBasesAllowed, pitching.battersFaced - pitching.walksAllowed - pitching.hitByPitchAllowed)
+    val xBAAllowed = rate(xHitsAllowed, xAtBatsAllowed)
+    val xWOBAAllowed = rate(xWeightedTimesOnBaseAllowed, xWobaDenominatorAllowed)
+    val xSLGAllowed = rate(xTotalBasesAllowed, xAtBatsAllowed)
 
     return ExpectedPitchingLine(
         xBAAllowed = xBAAllowed,
@@ -597,20 +722,27 @@ private fun combineExpectedPitching(lines: List<ExpectedPitchingLine>, pitching:
         contactRunValueAllowed = contactRunValueAllowed,
         disciplineRunValueAllowed = disciplineRunValueAllowed,
         runPreventionValue = -qualityAdjustedRunsAllowed,
+        xAtBatsAllowed = xAtBatsAllowed,
+        xObpDenominatorAllowed = xObpDenominatorAllowed,
+        xWobaDenominatorAllowed = xWobaDenominatorAllowed,
     )
 }
 
 fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: List<Pitch>) : ProcessedGame {
     val batters: List<Batter> = basicGame.gameData.players.map { player ->
         val rawBatPitches = pitchData.filter { pitch -> pitch.batterId == player.value.id }
-        val batPitches = finalPlateAppearancePitches(rawBatPitches)
+        val batPitchRows = rawBatPitches.filter { isPitchRow(it) }
+        val batPlateAppearances = plateAppearances(rawBatPitches)
+        val batPitches = batPlateAppearances.map { it.finalPitch }
         val batting = summarizeBatting(batPitches)
         val battedBall = summarizeBattedBalls(batPitches)
-        val nPA = batPitches.maxOfOrNull { pitch -> pitch.nPrioirPA }?.plus(1) ?: 0
-        val plateDiscipline = summarizePlateDiscipline(rawBatPitches, nPA)
+        val nPA = batting.plateAppearances
+        val plateDiscipline = summarizePlateDiscipline(batPitchRows, batPlateAppearances)
         val expected = summarizeExpectedBatting(batPitches, batting, battedBall, plateDiscipline)
-        val batSpeeds = rawBatPitches.mapNotNull { pitch -> pitch.batSpeed }
+        val scoringChances = summarizeScoringChances(batPlateAppearances)
+        val batSpeeds = batPitchRows.mapNotNull { pitch -> pitch.batSpeed }
         val onHomeTeam = if (batPitches.isEmpty()) false else !batPitches.first().topOfInning
+        val boxscorePlayer = basicGame.liveData.boxscore.player(player.key, onHomeTeam)
 
         Batter(
             id = player.value.id,
@@ -618,8 +750,8 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
             lastName = player.value.lastName,
             fullName = player.value.fullName,
             hits = batting.hits,
-            runs = 0,
-            errors = 0,
+            runs = boxscorePlayer?.stats?.batting?.runs ?: 0,
+            errors = boxscorePlayer?.stats?.fielding?.errors ?: 0,
             primaryNumber = player.value.primaryNumber,
             xBa = expected.xBA,
             wOBA = expected.xWOBA,
@@ -627,13 +759,16 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
             wOPS = expected.xWOBA + expected.xSLG,
             nPA = nPA,
             abCount = batting.atBats,
-            wobaCount = batPitches.count { it.event !in nonWobaEvents },
+            wobaCount = expected.xWobaDenominator,
             maxBatSpeed = batSpeeds.maxOrNull() ?: 0.0,
             position = player.value.primaryPosition.code,
             batHand = player.value.batHand?.code,
-            avgBatSpeed = if (batSpeeds.isEmpty()) 0.0 else batSpeeds.average(),
+            avgBatSpeed = averageBatSpeed(batSpeeds),
             maxExitVelo = battedBall.maxExitVelo,
             avgExitVelo = battedBall.avgExitVelo,
+            rispPlateAppearances = scoringChances.chances,
+            rispConversions = scoringChances.conversions,
+            rispConversionRate = scoringChances.conversionRate,
             expTimesOnBase = expected.xWeightedTimesOnBase,
             expBases = expected.xTotalBases,
             tOPS = expected.xWeightedTimesOnBase + expected.xTotalBases,
@@ -647,8 +782,10 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
 
     val pitchers: List<Pitcher> = basicGame.gameData.players.map { player ->
         val rawPitches = pitchData.filter { pitch -> pitch.pitcherId == player.value.id }
-        val finalPitches = finalPlateAppearancePitches(rawPitches)
-        val batSpeeds = rawPitches.mapNotNull { pitch -> pitch.batSpeed }
+        val pitchRows = rawPitches.filter { isPitchRow(it) }
+        val pitcherPlateAppearances = plateAppearances(rawPitches)
+        val finalPitches = pitcherPlateAppearances.map { it.finalPitch }
+        val batSpeeds = pitchRows.mapNotNull { pitch -> pitch.batSpeed }
 
         val expRunsAgainst = rawPitches.groupBy { it.batterId to it.nPrioirPA }
             .values.sumOf { pitchList -> maxOf(0.0, pitchList.sumOf { pitch -> pitch.pitchDelta } ) }
@@ -667,8 +804,8 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         }
 
         val contactAllowed = summarizeBattedBalls(finalPitches)
-        val plateDiscipline = summarizePlateDiscipline(rawPitches, finalPitches.size)
-        val pitching = summarizePitching(rawPitches, finalPitches, outsRecorded)
+        val plateDiscipline = summarizePlateDiscipline(pitchRows, pitcherPlateAppearances)
+        val pitching = summarizePitching(pitchRows, finalPitches, outsRecorded, plateDiscipline)
         val expected = summarizeExpectedPitching(finalPitches, expRunsAgainst, pitching, contactAllowed, plateDiscipline)
         val onHomeTeam = if (finalPitches.isEmpty()) false else finalPitches.first().topOfInning
 
@@ -680,7 +817,7 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
             primaryNumber = player.value.primaryNumber,
             maxBatSpeed = batSpeeds.maxOrNull() ?: 0.0,
             pitchHand = player.value.pitchHand?.code,
-            avgBatSpeed = if (batSpeeds.isEmpty()) 0.0 else batSpeeds.average(),
+            avgBatSpeed = averageBatSpeed(batSpeeds),
             maxExitVelo = contactAllowed.maxExitVelo,
             avgExitVelo = contactAllowed.avgExitVelo,
             xBA = expected.xBAAllowed,
@@ -692,7 +829,7 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
             expBases = expected.xTotalBasesAllowed,
             expTimesOnBase = expected.xWeightedTimesOnBaseAllowed,
             avgLA = contactAllowed.avgLaunchAngle,
-            expRunsAgainst = expRunsAgainst,
+            expRunsAgainst = expected.expectedRunsAllowed,
             onHomeTeam = onHomeTeam,
             strikeouts = pitching.strikeouts,
             hitsAgainst = pitching.hitsAllowed,
@@ -783,6 +920,9 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         wOPS = homeTeamStats["wOPS"] as Double,
         expTimesOn = homeTeamStats["expTimesOnBase"] as Double,
         expRunsAgainst = homeTeamStats["expRunsAgainst"] as Double,
+        scoringChances = homeTeamStats["scoringChances"] as Int,
+        scoringChanceConversions = homeTeamStats["scoringChanceConversions"] as Int,
+        scoringChanceConversionRate = homeTeamStats["scoringChanceConversionRate"] as Double,
         batting = homeTeamStats["batting"] as BattingLine,
         expectedBatting = homeTeamStats["expectedBatting"] as ExpectedBattingLine,
         battedBall = homeTeamStats["battedBall"] as BattedBallProfile,
@@ -805,6 +945,9 @@ fun processGame(statcastGame: StatcastGame, basicGame: BasicGame, pitchData: Lis
         expRunsFor = awayTeamStats["expRunsFor"] as Double,
         expTimesOn = awayTeamStats["expTimesOnBase"] as Double,
         expRunsAgainst = awayTeamStats["expRunsAgainst"] as Double,
+        scoringChances = awayTeamStats["scoringChances"] as Int,
+        scoringChanceConversions = awayTeamStats["scoringChanceConversions"] as Int,
+        scoringChanceConversionRate = awayTeamStats["scoringChanceConversionRate"] as Double,
         expWin = awayExpWin,
         expWinBat = awayExpWinBat,
         expWinPitch = awayExpWinPitch,
@@ -938,6 +1081,9 @@ fun getTeamData(forHomeTeam: Boolean, batters: List<Batter>, pitchers: List<Pitc
     val expRunsFor = expectedBatting.qualityAdjustedRuns
     val expTimesOnBase = teamBatters.sumOf{ it.expTimesOnBase }
     val expRunsAgainst = expectedPitching.qualityAdjustedRunsAllowed
+    val scoringChances = teamBatters.sumOf { it.rispPlateAppearances }
+    val scoringChanceConversions = teamBatters.sumOf { it.rispConversions }
+    val scoringChanceConversionRate = rate(scoringChanceConversions, scoringChances)
     return mapOf(
         "nPA" to nPA,
         "xBA" to xBA,
@@ -947,6 +1093,9 @@ fun getTeamData(forHomeTeam: Boolean, batters: List<Batter>, pitchers: List<Pitc
         "expRunsFor" to expRunsFor,
         "expRunsAgainst" to expRunsAgainst,
         "expTimesOnBase" to expTimesOnBase,
+        "scoringChances" to scoringChances,
+        "scoringChanceConversions" to scoringChanceConversions,
+        "scoringChanceConversionRate" to scoringChanceConversionRate,
         "batting" to batting,
         "expectedBatting" to expectedBatting,
         "battedBall" to battedBall,
@@ -961,5 +1110,8 @@ data class ParsedGame(
     val gamePk: Int,
     val teams: Teams,
     val venue: Venue,
-    val gameDate: String
+    val gameDate: String,
+    val officialDate: String,
+    val scheduledStartUtc: String,
+    val scheduledStartTimeUtc: String,
 )

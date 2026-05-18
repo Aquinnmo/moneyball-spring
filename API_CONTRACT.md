@@ -131,6 +131,8 @@ Detailed MLB schedule information.
 
 ### ParsedGame
 Simplified game representation.
+`gameDate` is the MLB official/baseball date (`YYYY-MM-DD`), not the UTC timestamp date.
+`scheduledStartUtc` preserves the MLB scheduled start instant, and `scheduledStartTimeUtc` is the parsed UTC time from that instant.
 ```json
 {
   "gamePk": "number",
@@ -139,7 +141,10 @@ Simplified game representation.
     "home": { "team": { "id": "number", "name": "string" } }
   },
   "venue": { "id": "number", "name": "string" },
-  "gameDate": "string"
+  "gameDate": "string",
+  "officialDate": "string",
+  "scheduledStartUtc": "string",
+  "scheduledStartTimeUtc": "string"
 }
 ```
 
@@ -272,6 +277,9 @@ Game-level "what should have happened" model.
   "expWinPitch": "number | null",
   "expTimesOn": "number",
   "expRunsAgainst": "number",
+  "scoringChances": "number (team plate appearances that began with a runner on second and/or third)",
+  "scoringChanceConversions": "number (scoring chances where at least one batting-team run scored)",
+  "scoringChanceConversionRate": "number",
   "batting": "BattingLine object",
   "expectedBatting": "ExpectedBattingLine object",
   "battedBall": "BattedBallProfile object",
@@ -329,6 +337,9 @@ Team-level expected outcome model.
   "avgBatSpeed": "number",
   "maxBatSpeed": "number",
   "avgExitVelo": "number",
+  "rispPlateAppearances": "number (plate appearances that began with a runner on second and/or third)",
+  "rispConversions": "number (RISP plate appearances where at least one batting-team run scored)",
+  "rispConversionRate": "number",
   "onHomeTeam": "boolean",
   "batting": "BattingLine object",
   "expected": "ExpectedBattingLine object",
@@ -509,6 +520,9 @@ Expected offensive production allowed by a pitcher or pitching staff.
 ### Rate and Metric Notes
 - All rates are raw 0-to-1 numbers so the frontend can render either decimals or percentages.
 - All divide-by-zero cases return `0.0`.
+- RISP/scoring-chance counts use runner state at the start of the plate appearance. A conversion means the batting team's score increased on that plate appearance result.
+- xwOBA denominators exclude intentional walks, sacrifice bunts, and catcher interference. Batted-ball averages use only tracked samples for that measurement, while batted-ball rates still use total balls in play.
+- `avgBatSpeed` uses Statcast's average-bat-speed convention: the fastest 90% of tracked swings.
 - `xWeightedTimesOnBase` preserves the service's existing wOBA-style expected on-base weighting. It should be treated as a weighted expected on-base contribution, not a literal count of baserunners.
 - `expRunsFor` now maps to `expectedBatting.qualityAdjustedRuns`, replacing the older `sum(xSLG)` proxy.
 - `expRunsAgainst` now maps to `expectedPitching.qualityAdjustedRunsAllowed`.
