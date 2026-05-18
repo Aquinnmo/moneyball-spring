@@ -16,6 +16,44 @@ data class BasicGame(
 data class LiveData(
     val linescore: LineScore,
     val decisions: Decisions?,
+    val boxscore: Boxscore? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class Boxscore(
+    val teams: BoxscoreTeams,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BoxscoreTeams(
+    val home: BoxscoreTeam,
+    val away: BoxscoreTeam,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BoxscoreTeam(
+    val players: Map<String, BoxscorePlayer> = emptyMap(),
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BoxscorePlayer(
+    val stats: BoxscoreStats? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BoxscoreStats(
+    val batting: BoxscoreBatting? = null,
+    val fielding: BoxscoreFielding? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BoxscoreBatting(
+    val runs: Int? = null,
+)
+
+@JsonIgnoreProperties(ignoreUnknown = true)
+data class BoxscoreFielding(
+    val errors: Int? = null,
 )
 
 @JsonIgnoreProperties(ignoreUnknown = true)

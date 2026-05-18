@@ -8,11 +8,18 @@ import ca.adam_montgomery.moneyball.structures.TeamWrapper
 import org.springframework.boot.autoconfigure.SpringBootApplication
 import org.springframework.boot.runApplication
 import org.springframework.context.annotation.Configuration
+import org.springframework.format.annotation.DateTimeFormat
+import org.springframework.http.HttpStatus
 import org.springframework.web.bind.annotation.GetMapping
 import org.springframework.web.bind.annotation.PathVariable
 import org.springframework.web.bind.annotation.RestController
 import org.springframework.web.servlet.config.annotation.CorsRegistry
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer
+import java.time.Instant
+import java.time.LocalDate
+import java.time.ZoneOffset
+import java.time.format.DateTimeFormatter
+import org.springframework.web.server.ResponseStatusException
 
 @SpringBootApplication
 class MoneyballApplication
@@ -58,9 +65,11 @@ class APIInterface(private val statsAPI: StatsApiWrapper, private val statcastAP
 	@GetMapping("game={gamePk}")
 	fun getGame(@PathVariable gamePk: Int) : ProcessedGame {
 		println("getting game data for $gamePk")
-		val statcastData = statcastAPI.getGameData(gamePk) ?: throw Exception("no statcast data for $gamePk")
+		val statcastData = statcastAPI.getGameData(gamePk)
+			?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "No Statcast data found for game $gamePk")
 		println("successfully got all statcast data for $gamePk")
-		val basicData = statsAPI.getGame(gamePk) ?: throw Exception("no basic data for $gamePk")
+		val basicData = statsAPI.getGame(gamePk)
+			?: throw ResponseStatusException(HttpStatus.NOT_FOUND, "No basic data found for game $gamePk")
 		println("successfully got all game data for $gamePk")
 		val pitchData = statcastAPI.fetchCSV(gamePk)
 		if (pitchData.isEmpty()) {println("empty csv data for $gamePk")}
@@ -78,15 +87,24 @@ class APIInterface(private val statsAPI: StatsApiWrapper, private val statcastAP
 	}
 
 	@GetMapping("schedule/{date}")
-	fun dateSchedule(@PathVariable date: String): Schedule? {
-		print("hit schedule endpoint for date $date\n")
-		val sched = statsAPI.getSchedule(date)
-		print("successfully got schedule for date $date\n")
+	fun dateSchedule(
+		@PathVariable
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		date: LocalDate,
+	): Schedule? {
+		val scheduleDate = date.toString()
+		print("hit schedule endpoint for date $scheduleDate\n")
+		val sched = statsAPI.getSchedule(scheduleDate)
+		print("successfully got schedule for date $scheduleDate\n")
 		return sched
 	}
 
 	@GetMapping("games/{date}")
-	fun dateGames(@PathVariable date: String): List<ParsedGame>? {
+	fun dateGames(
+		@PathVariable
+		@DateTimeFormat(iso = DateTimeFormat.ISO.DATE)
+		date: LocalDate,
+	): List<ParsedGame>? {
 		val sched = dateSchedule(date)
 		print("successfully got games for date $date\n")
 		return getGamesFromSchedule(sched)
@@ -96,7 +114,17 @@ class APIInterface(private val statsAPI: StatsApiWrapper, private val statcastAP
 
 		return sched?.dates?.flatMap { date ->
 			date.games.map { game ->
-				ParsedGame(game.gamePk, game.teams, game.venue, date.date)
+				val scheduledStart = Instant.parse(game.gameDate)
+
+				ParsedGame(
+					gamePk = game.gamePk,
+					teams = game.teams,
+					venue = game.venue,
+					gameDate = game.officialDate,
+					officialDate = game.officialDate,
+					scheduledStartUtc = DateTimeFormatter.ISO_INSTANT.format(scheduledStart),
+					scheduledStartTimeUtc = DateTimeFormatter.ISO_LOCAL_TIME.withZone(ZoneOffset.UTC).format(scheduledStart),
+				)
 			}
 		} ?: emptyList()
 	}

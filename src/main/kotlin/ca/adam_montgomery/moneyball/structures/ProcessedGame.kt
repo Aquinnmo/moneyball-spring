@@ -1,5 +1,7 @@
 package ca.adam_montgomery.moneyball.structures
 
+import com.fasterxml.jackson.annotation.JsonIgnore
+
 data class ProcessedGame(
     val gamePk: Int,
     val dateTime: DateTime,
@@ -152,6 +154,7 @@ data class ExpectedBattingLine(
     val totalBasesAboveExpected: Double = 0.0,
     val opsAboveExpected: Double = 0.0,
     val runsCreatedAboveExpected: Double = 0.0,
+    @get:JsonIgnore val xWobaDenominator: Int = 0,
 )
 
 data class BattedBallProfile(
@@ -165,6 +168,8 @@ data class BattedBallProfile(
     val hardHitRate: Double = 0.0,
     val barrelRate: Double = 0.0,
     val sweetSpotRate: Double = 0.0,
+    @get:JsonIgnore val exitVeloSamples: Int = 0,
+    @get:JsonIgnore val launchAngleSamples: Int = 0,
 )
 
 data class PlateDiscipline(
@@ -215,6 +220,9 @@ data class ExpectedPitchingLine(
     val contactRunValueAllowed: Double = 0.0,
     val disciplineRunValueAllowed: Double = 0.0,
     val runPreventionValue: Double = 0.0,
+    @get:JsonIgnore val xAtBatsAllowed: Int = 0,
+    @get:JsonIgnore val xObpDenominatorAllowed: Int = 0,
+    @get:JsonIgnore val xWobaDenominatorAllowed: Int = 0,
 )
 
 data class Batter(
@@ -242,6 +250,9 @@ data class Batter(
     val avgBatSpeed: Double,
     val maxBatSpeed: Double,
     val avgExitVelo: Double,
+    val rispPlateAppearances: Int = 0,
+    val rispConversions: Int = 0,
+    val rispConversionRate: Double = 0.0,
     val onHomeTeam: Boolean,
     val batting: BattingLine = BattingLine(),
     val expected: ExpectedBattingLine = ExpectedBattingLine(),
@@ -304,6 +315,9 @@ data class Team(
     val expWinPitch: Double?,
     val expTimesOn: Double,
     val expRunsAgainst: Double,
+    val scoringChances: Int = 0,
+    val scoringChanceConversions: Int = 0,
+    val scoringChanceConversionRate: Double = 0.0,
     val batting: BattingLine = BattingLine(),
     val expectedBatting: ExpectedBattingLine = ExpectedBattingLine(),
     val battedBall: BattedBallProfile = BattedBallProfile(),
